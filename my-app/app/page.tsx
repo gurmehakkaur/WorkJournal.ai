@@ -3,14 +3,54 @@
 import { useState } from 'react'
 import { Send } from 'lucide-react'
 
+interface Message {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export default function HomePage() {
   const [input, setInput] = useState('')
-  const [messages, setMessages] = useState<string[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
+  const [loading, setLoading] = useState(false)
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return
-    setMessages(prev => [...prev, input])
+
+    const userMessage = input.trim()
     setInput('')
+
+    // Add user message to chat
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }])
+    setLoading(true)
+
+    try {
+      // Call backend API
+      const response = await fetch('http://localhost:8000/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: messages.map(msg => ({
+            role: msg.role,
+            content: msg.content
+          })).concat({ role: 'user', content: userMessage })
+        }),
+      })
+
+      const data = await response.json()
+
+      // Add assistant response to chat
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
+    } catch (error) {
+      console.error('Error:', error)
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: 'Sorry, I encountered an error. Please try again.' 
+      }])
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -30,21 +70,34 @@ export default function HomePage() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 px-6 py-4 space-y-3 overflow-hidden">
+        <div className="flex-1 px-6 py-4 space-y-3 overflow-y-auto">
           {messages.length === 0 && (
             <div className="text-neutral-500 text-sm mt-10">
-              Start a conversation with <span className="text-white">WorkJournal</span>.
+              Let us talk and add a new entry to your <span className="text-white">WorkJournal</span>.
             </div>
           )}
 
           {messages.map((msg, idx) => (
-            <div
-              key={idx}
-              className="self-end max-w-[80%] bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm shadow"
-            >
-              {msg}
+            <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div
+                className={`max-w-[80%] px-4 py-2 rounded-xl text-sm shadow ${
+                  msg.role === 'user'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-neutral-800 text-neutral-100'
+                }`}
+              >
+                {msg.content}
+              </div>
             </div>
           ))}
+
+          {loading && (
+            <div className="flex justify-start">
+              <div className="bg-neutral-800 text-neutral-100 px-4 py-2 rounded-xl text-sm">
+                <span className="inline-block animate-pulse">Thinking...</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Input */}
@@ -53,13 +106,15 @@ export default function HomePage() {
             <input
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSend()}
+              onKeyDown={e => e.key === 'Enter' && !loading && handleSend()}
               placeholder="Type your message..."
-              className="flex-1 bg-transparent text-sm text-white placeholder-neutral-400 outline-none"
+              disabled={loading}
+              className="flex-1 bg-transparent text-sm text-white placeholder-neutral-400 outline-none disabled:opacity-50"
             />
             <button
               onClick={handleSend}
-              className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 transition"
+              disabled={loading}
+              className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send size={16} className="text-white" />
             </button>
