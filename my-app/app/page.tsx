@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Send } from 'lucide-react'
 
 interface Message {
@@ -9,9 +9,43 @@ interface Message {
 }
 
 export default function HomePage() {
+  const [sessionId, setSessionId] = useState<string>('')
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
+
+  // Initialize on mount - load existing session if it exists
+  useEffect(() => {
+    const initializeSession = async () => {
+      // Check if sessionId exists in localStorage
+      const storedSessionId = localStorage.getItem('chatSessionId')
+      
+      if (storedSessionId) {
+        setSessionId(storedSessionId)
+        
+        // Load conversation history from localStorage first
+        const cachedMessages = localStorage.getItem(`999999:${storedSessionId}`)
+        if (cachedMessages) {
+          setMessages(JSON.parse(cachedMessages))
+        }
+        
+        // Fetch fresh history from backend (background)
+        try {
+          const response = await fetch(`http://localhost:8000/chat/history?sessionId=${storedSessionId}&limit=20`)
+          const data = await response.json()
+          setMessages(data.messages)
+          localStorage.setItem(`999999:${storedSessionId}`, JSON.stringify(data.messages))
+        } catch (error) {
+          console.error('Error loading history:', error)
+        }
+      }
+      
+      setIsInitialized(true)
+    }
+    
+    initializeSession()
+  }, [])
 
   const handleSend = async () => {
     if (!input.trim()) return
@@ -19,38 +53,54 @@ export default function HomePage() {
     const userMessage = input.trim()
     setInput('')
 
-    // Add user message to chat
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }])
+    // Create new session ID if this is the first message
+    let currentSessionId = sessionId
+    if (!currentSessionId) {
+      // Generate sessionId based on current time
+      currentSessionId = 'session_' + Date.now()
+      setSessionId(currentSessionId)
+      localStorage.setItem('chatSessionId', currentSessionId)
+    }
+
+    // Add user message to local state immediately
+    setMessages(prev => [...prev, { role: 'user' as const, content: userMessage }])
     setLoading(true)
 
     try {
-      // Call backend API
+      // Call backend with sessionId and message
       const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: messages.map(msg => ({
-            role: msg.role,
-            content: msg.content
-          })).concat({ role: 'user', content: userMessage })
+          sessionId: currentSessionId,
+          message: userMessage
         }),
       })
 
       const data = await response.json()
 
-      // Add assistant response to chat
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
+      // Add assistant response
+      setMessages(prev => {
+        const updated: Message[] = [...prev, { role: 'assistant' as const, content: data.reply }]
+        // Update cache with userid:sessionid format
+        localStorage.setItem(`999999:${currentSessionId}`, JSON.stringify(updated))
+        return updated
+      })
     } catch (error) {
       console.error('Error:', error)
       setMessages(prev => [...prev, { 
-        role: 'assistant', 
+        role: 'assistant' as const, 
         content: 'Sorry, I encountered an error. Please try again.' 
       }])
     } finally {
       setLoading(false)
     }
+  }
+
+  if (!isInitialized) {
+    return <div className="flex items-center justify-center h-screen">Loading...</div>
   }
 
   return (
@@ -73,7 +123,7 @@ export default function HomePage() {
         <div className="flex-1 px-6 py-4 space-y-3 overflow-y-auto">
           {messages.length === 0 && (
             <div className="text-neutral-500 text-sm mt-10">
-              Let us talk and add a new entry to your <span className="text-white">WorkJournal</span>.
+              Start a conversation with <span className="text-white">WorkJournal</span>.
             </div>
           )}
 
